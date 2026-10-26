@@ -87,6 +87,45 @@ describe('queries', () => {
     assert.equal(exact.truncated, false);
   });
 
+  it('runs EXPLAIN with maxRows', async () => {
+    const ctx = new SessionContext();
+    ctx.registerTable('users', usersTable());
+    const result = await ctx.sql('EXPLAIN SELECT id FROM users WHERE age > 30', { maxRows: 100 });
+    assert.deepEqual(result.columns.map((c) => c.name), ['plan_type', 'plan']);
+    assert.ok(result.rows.length >= 2);
+    assert.equal(result.truncated, false);
+
+    const one = await ctx.sql('EXPLAIN SELECT id FROM users', { maxRows: 1 });
+    assert.equal(one.rows.length, 1);
+    assert.equal(one.truncated, true);
+  });
+
+  it('runs EXPLAIN ANALYZE with maxRows', async () => {
+    const ctx = new SessionContext();
+    const users = usersTable();
+    ctx.registerTable('users', users);
+    const result = await ctx.sql('EXPLAIN ANALYZE SELECT id FROM users ORDER BY id', { maxRows: 100 });
+    assert.deepEqual(result.columns.map((c) => c.name), ['plan_type', 'plan']);
+    assert.equal(result.rows.length, 1);
+    const [planType, plan] = result.rows[0] ?? [];
+    assert.equal(planType, 'Plan with Metrics');
+    assert.match(String(plan), /output_rows=5/);
+    assert.equal(result.truncated, false);
+    assert.equal(users.scans.length, 1);
+
+    const verbose = await ctx.sql('EXPLAIN ANALYZE VERBOSE SELECT id FROM users', { maxRows: 2 });
+    assert.deepEqual(verbose.rows.map((r) => r[0]), ['Plan with Metrics', 'Plan with Full Metrics']);
+    assert.equal(verbose.truncated, true);
+  });
+
+  it('runs DESCRIBE with maxRows', async () => {
+    const ctx = new SessionContext();
+    ctx.registerTable('users', usersTable());
+    const result = await ctx.sql('DESCRIBE users', { maxRows: 2 });
+    assert.deepEqual(result.rows.map((r) => r[0]), ['id', 'name']);
+    assert.equal(result.truncated, true);
+  });
+
   it('returns Arrow IPC and apache-arrow tables', async () => {
     const ctx = new SessionContext();
     ctx.registerTable('users', usersTable());

@@ -138,7 +138,8 @@ ctx.sqlArrow(query, options?): Promise<{ table: Table; truncated: boolean }>  //
 ctx.sqlIpc(query, options?): Promise<{ ipc: Uint8Array; truncated: boolean }> // Arrow IPC stream
 ```
 
-`maxRows` returns at most that many rows and sets `truncated` if there were more.
+`maxRows` returns at most that many rows and sets `truncated` if there were more. This also applies to
+`EXPLAIN`, `EXPLAIN ANALYZE` and `DESCRIBE`, whose output rows are cut after the plan runs.
 
 Queries are read-only. DDL (`CREATE`), DML (`INSERT`) and statements (`SET`) are rejected, so a query
 cannot change the session or raise its own memory limit. `EXPLAIN` and `SHOW TABLES` work.
