@@ -1,0 +1,39 @@
+[package]
+name = "datafusion-vtab"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["datetime", "string", "unicode", "regex", "nested"]
+# SQL function groups. Each one adds to the size of the WASM binary.
+datetime = ["datafusion/datetime_expressions"]
+string = ["datafusion/string_expressions"]
+unicode = ["datafusion/unicode_expressions"]
+regex = ["datafusion/regex_expressions"]
+nested = ["datafusion/nested_expressions"]
+
+[dependencies]
+datafusion = { version = "55.2", default-features = false, features = ["sql"] }
+datafusion-functions-json = "0.55.6"
+async-trait = "0.1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "=0.4.79"
+js-sys = "0.3"
+# DataFusion reads the clock through chrono; wasmbind uses JavaScript Date.
+chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,51 @@
+{
+  "name": "datafusion-vtab",
+  "version": "0.1.0",
+  "description": "Apache DataFusion compiled to WebAssembly, with async JavaScript virtual tables",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rockwotj/datafusion-vtab.git"
+  },
+  "keywords": [
+    "datafusion",
+    "sql",
+    "arrow",
+    "wasm",
+    "webassembly",
+    "virtual-table"
+  ],
+  "engines": {
+    "node": ">=20.16"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:ts": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/wasm', 'dist/wasm', { recursive: true })\"",
+    "build": "npm run build:wasm && npm run build:ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "apache-arrow": "^21.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "binaryen": "^132.0.0",
+    "typescript": "^5.9.0"
+  }
+}
