@@ -47,8 +47,8 @@ const users: VirtualTable = {
 };
 
 const ctx = new SessionContext({ memoryLimit: 256 * 1024 * 1024 });
-ctx.registerTable('users', users, { pushdown: true });
-ctx.registerTable('orders', orders, { pushdown: true });
+ctx.registerTable('users', users);
+ctx.registerTable('orders', orders);
 
 const { columns, rows, truncated } = await ctx.sql(
   `SELECT u.name, u.profile->>'country' AS country, COUNT(*) AS orders
@@ -71,7 +71,7 @@ const { columns, rows, truncated } = await ctx.sql(
 
 Sessions are cheap. Creating one per query is fine.
 
-### `ctx.registerTable(name, table, { pushdown })`
+### `ctx.registerTable(name, table)`
 
 Registers a `VirtualTable`, replacing any table with the same name. `deregisterTable(name)` removes it.
 
@@ -85,7 +85,7 @@ interface VirtualTable {
 interface ScanRequest {
   projection: string[]; // columns the query reads, in schema order; empty for COUNT(*)
   filters: Filter[];    // filters accepted as 'exact' or 'inexact'; rows must match all of them
-  limit: number | null; // rows the query needs; only set when every filter in the query is exact
+  limit: number | null; // rows the query needs; only set when no filter remains for DataFusion to apply
 }
 ```
 
@@ -95,8 +95,8 @@ cast to the declared schema, so dictionary-encoded strings from `tableFromArrays
 stops early (a `LIMIT`, an error, a join that no longer needs the input), the iterator's `return()` is
 called, so `finally` blocks run. Errors thrown by `scan` fail the query with a message naming the table.
 
-Projection is always passed. Filters and limits are only passed when the table is registered with
-`pushdown: true`.
+Projection and limit are always passed. Filters are passed only to tables that define
+`supportsFilters`.
 
 ### Filters
 
@@ -127,7 +127,7 @@ evaluates it.
 | `inexact`     | yes                    | yes                       | no                    |
 | `unsupported` | no                     | yes                       | no                    |
 
-Without `supportsFilters`, every filter is `inexact`. `supportsFilters` may be async: the query is
+Without `supportsFilters`, every filter is `unsupported`. `supportsFilters` may be async: the query is
 planned once to collect the filters, the answers are awaited, and then the query is planned for real.
 
 ### Running queries
@@ -138,10 +138,10 @@ ctx.sqlArrow(query, options?): Promise<{ table: Table; truncated: boolean }>  //
 ctx.sqlIpc(query, options?): Promise<{ ipc: Uint8Array; truncated: boolean }> // Arrow IPC stream
 ```
 
-| Option     | Default | Meaning                                                                                  |
-| ---------- | ------- | ---------------------------------------------------------------------------------------- |
-| `maxRows`  | none    | Return at most this many rows. `truncated` is true if there were more.                   |
-| `readonly` | `true`  | Reject DDL (`CREATE`), DML (`INSERT`) and statements (`SET`), so a query cannot change the session or raise its own memory limit. |
+`maxRows` returns at most that many rows and sets `truncated` if there were more.
+
+Queries are read-only. DDL (`CREATE`), DML (`INSERT`) and statements (`SET`) are rejected, so a query
+cannot change the session or raise its own memory limit. `EXPLAIN` and `SHOW TABLES` work.
 
 `sql` returns rows as arrays of JSON-friendly values: 64-bit integers are numbers, or decimal strings
 beyond 2^53. Dates and timestamps are ISO 8601 strings. Lists and structs are arrays and objects. JSON
@@ -149,6 +149,12 @@ values returned by `->` and `json_get` are JSON text.
 
 The SQL dialect is DataFusion's, parsed as PostgreSQL. See the
 [DataFusion SQL reference](https://datafusion.apache.org/user-guide/sql/index.html).
+
+### Functions
+
+DataFusion's built-in scalar, aggregate and window functions are included: string, regex, unicode,
+math, datetime, arrays and `unnest`, `md5`/`sha256`, `encode`/`decode`, approximate aggregates
+(`approx_distinct`, `approx_percentile_cont`), and the table functions `generate_series` and `range`.
 
 ### JSON functions
 

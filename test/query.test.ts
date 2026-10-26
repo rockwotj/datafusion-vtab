@@ -126,12 +126,29 @@ describe('queries', () => {
     ]);
   });
 
-  it('rejects DDL and SET unless readonly is false', async () => {
+  it('rejects DDL, DML and SET', async () => {
     const ctx = new SessionContext();
+    ctx.registerTable('users', usersTable());
     await assert.rejects(ctx.sql('CREATE TABLE x AS SELECT 1'), /DDL not supported/);
-    await assert.rejects(ctx.sql("SET datafusion.execution.batch_size = 10"), /not supported/);
-    await ctx.sql('CREATE VIEW v AS SELECT 1 AS one', { readonly: false });
-    assert.deepEqual((await ctx.sql('SELECT one FROM v')).rows, [[1]]);
+    await assert.rejects(ctx.sql('CREATE VIEW v AS SELECT 1'), /DDL not supported/);
+    await assert.rejects(ctx.sql('INSERT INTO users VALUES (9, \'x\', 1)'), /not supported/);
+    await assert.rejects(ctx.sql("SET datafusion.runtime.memory_limit = '10G'"), /not supported/);
+    // Queries, EXPLAIN and SHOW still work.
+    assert.equal((await ctx.sql('SHOW TABLES')).rows.length > 0, true);
+    assert.equal((await ctx.sql('EXPLAIN SELECT 1')).rows.length > 0, true);
+  });
+
+  it('includes window, table, crypto and encoding functions', async () => {
+    const ctx = new SessionContext();
+    const result = await ctx.sql(`
+      SELECT value, row_number() OVER (ORDER BY value DESC) AS rank,
+        md5('hi') AS md5, encode('hi', 'hex') AS hex
+      FROM generate_series(1, 2) ORDER BY value
+    `);
+    assert.deepEqual(result.rows, [
+      [1, 2, '49f68a5c8493ec2c0bf489821c21fc3b', '6869'],
+      [2, 1, '49f68a5c8493ec2c0bf489821c21fc3b', '6869'],
+    ]);
   });
 
   it('reports SQL errors', async () => {

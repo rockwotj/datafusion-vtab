@@ -48,19 +48,12 @@ describe('projection pushdown', () => {
 });
 
 describe('filter pushdown', () => {
-  it('does not offer filters when pushdown is off', async () => {
-    let asked = false;
-    const users = usersTable({
-      supportsFilters: (filters) => {
-        asked = true;
-        return filters.map(() => 'exact' as const);
-      },
-    });
+  it('passes no filters to tables without supportsFilters', async () => {
+    const users = usersTable();
     const ctx = new SessionContext();
     ctx.registerTable('users', users);
     const result = await ctx.sql('SELECT id FROM users WHERE age > 30 ORDER BY id LIMIT 1');
     assert.deepEqual(result.rows, [[3]]);
-    assert.equal(asked, false);
     assert.deepEqual(users.scans[0]!.filters, []);
     assert.equal(users.scans[0]!.limit, null);
   });
@@ -74,7 +67,7 @@ describe('filter pushdown', () => {
       },
     });
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     await ctx.sql(`
       SELECT id FROM users
       WHERE age >= 25
@@ -128,7 +121,7 @@ describe('filter pushdown', () => {
       },
     });
     const ctx = new SessionContext();
-    ctx.registerTable('t', table, { pushdown: true });
+    ctx.registerTable('t', table);
     await ctx.sql(`
       EXPLAIN SELECT * FROM t
       WHERE big = 9007199254740993 AND big > -5
@@ -151,7 +144,7 @@ describe('filter pushdown', () => {
       },
     });
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     const result = await ctx.sql(
       "SELECT id FROM users WHERE upper(name) = 'BOB' AND age + 1 > 20 AND name LIKE 'B%'",
     );
@@ -167,7 +160,7 @@ describe('supportsFilters', () => {
   async function query(support: FilterSupport) {
     const users = usersTable({ supportsFilters: (filters) => filters.map(() => support) });
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     const result = await ctx.sql('SELECT id FROM users WHERE age > 30 ORDER BY id');
     return { ids: result.rows.map((r) => r[0]), scan: users.scans[0]! };
   }
@@ -198,25 +191,16 @@ describe('supportsFilters', () => {
       },
     });
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     const result = await ctx.sql("SELECT id FROM users WHERE age > 30 AND name != 'Eve' ORDER BY id");
     assert.deepEqual(users.scans[0]!.filters, [{ op: '>', column: 'age', value: 30 }]);
     // The age filter was exact and the table ignored it; the name filter was applied by DataFusion.
     assert.deepEqual(result.rows, [[1], [2], [3], [4]]);
   });
 
-  it('defaults to inexact when the table has no supportsFilters', async () => {
-    const users = usersTable();
-    const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
-    const result = await ctx.sql('SELECT id FROM users WHERE age > 30 ORDER BY id');
-    assert.deepEqual(result.rows, [[3], [5]]);
-    assert.deepEqual(users.scans[0]!.filters, [{ op: '>', column: 'age', value: 30 }]);
-  });
-
   it('rejects a wrong number of answers', async () => {
     const ctx = new SessionContext();
-    ctx.registerTable('users', usersTable({ supportsFilters: () => [] }), { pushdown: true });
+    ctx.registerTable('users', usersTable({ supportsFilters: () => [] }));
     await assert.rejects(ctx.sql('SELECT id FROM users WHERE age > 30'), /returned 0 answers for 1 filters/);
   });
 
@@ -228,8 +212,7 @@ describe('supportsFilters', () => {
         supportsFilters: async () => {
           throw new Error('index lookup failed');
         },
-      }),
-      { pushdown: true },
+      })
     );
     await assert.rejects(ctx.sql('SELECT id FROM users WHERE age > 30'), /index lookup failed/);
   });
@@ -239,7 +222,7 @@ describe('limit pushdown', () => {
   it('passes the limit when there are no filters', async () => {
     const users = usersTable();
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     const result = await ctx.sql('SELECT id FROM users LIMIT 2');
     assert.equal(result.rows.length, 2);
     assert.equal(users.scans[0]!.limit, 2);
@@ -248,7 +231,7 @@ describe('limit pushdown', () => {
   it('passes the limit when every filter is exact', async () => {
     const users = usersTable({ supportsFilters: (filters) => filters.map(() => 'exact' as const) });
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     await ctx.sql('SELECT id FROM users WHERE age > 30 LIMIT 2');
     assert.equal(users.scans[0]!.limit, 2);
   });
@@ -256,7 +239,7 @@ describe('limit pushdown', () => {
   it('withholds the limit when a filter is inexact', async () => {
     const users = usersTable({ supportsFilters: (filters) => filters.map(() => 'inexact' as const) });
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
+    ctx.registerTable('users', users);
     await ctx.sql('SELECT id FROM users WHERE age > 30 LIMIT 2');
     assert.equal(users.scans[0]!.limit, null);
   });
@@ -279,8 +262,7 @@ describe('limit pushdown', () => {
             closed = true;
           }
         },
-      },
-      { pushdown: true },
+      }
     );
     const result = await ctx.sql('SELECT n FROM numbers LIMIT 3');
     assert.equal(result.rows.length, 3);

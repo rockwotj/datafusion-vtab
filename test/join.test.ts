@@ -93,11 +93,12 @@ describe('joins', () => {
   });
 
   it('pushes filters into each side of a join', async () => {
-    const users = usersTable();
-    const depts = departments();
+    const inexact = { supportsFilters: (filters: readonly unknown[]) => filters.map(() => 'inexact' as const) };
+    const users = usersTable(inexact);
+    const depts = Object.assign(departments(), inexact);
     const ctx = new SessionContext();
-    ctx.registerTable('users', users, { pushdown: true });
-    ctx.registerTable('departments', depts, { pushdown: true });
+    ctx.registerTable('users', users);
+    ctx.registerTable('departments', depts);
     await ctx.sql(`
       SELECT u.name FROM users u JOIN departments d ON u.id = d.user_id
       WHERE d.dept = 'eng' AND u.age > 29

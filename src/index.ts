@@ -68,8 +68,8 @@ export interface VirtualTable {
   /** The table's Arrow schema. Called once, when the table is registered. */
   schema(): Schema;
   /**
-   * Decides, for each filter, whether `scan` handles it. Only called for
-   * tables registered with `pushdown: true`. Default: `inexact` for all.
+   * Decides, for each filter, whether `scan` handles it. Without this
+   * method, no filters are passed to `scan` and DataFusion applies them all.
    */
   supportsFilters?(
     filters: readonly Filter[],
@@ -80,14 +80,6 @@ export interface VirtualTable {
    * iterator if it stops early, so `finally` blocks run.
    */
   scan(request: ScanRequest): AsyncIterable<ScanBatch> | Iterable<ScanBatch>;
-}
-
-export interface RegisterTableOptions {
-  /**
-   * Offer filters to `supportsFilters` and pass accepted filters and limits
-   * to `scan`. Projection is always passed. Default: false.
-   */
-  readonly pushdown?: boolean;
 }
 
 // ── Queries ──────────────────────────────────────────────────────────
@@ -106,11 +98,6 @@ export interface SessionContextOptions {
 export interface SqlOptions {
   /** Return at most this many rows and set `truncated` if there were more. */
   readonly maxRows?: number;
-  /**
-   * Reject DDL (`CREATE`, `DROP`), DML (`INSERT`) and statements (`SET`).
-   * Default: true, so queries cannot change the session or its limits.
-   */
-  readonly readonly?: boolean;
 }
 
 export interface Column {
@@ -146,7 +133,7 @@ export interface ArrowResult {
 
 interface Registration {
   readonly schemaIpc: Uint8Array;
-  readonly pushdown: boolean;
+  readonly filterPushdown: boolean;
   readonly callbacks: TableCallbacks;
 }
 
@@ -182,12 +169,12 @@ export class SessionContext {
   }
 
   /** Registers a virtual table. Replaces any table with the same name. */
-  registerTable(name: string, table: VirtualTable, options: RegisterTableOptions = {}): void {
+  registerTable(name: string, table: VirtualTable): void {
     this.assertOpen();
     const schema = table.schema();
     const registration: Registration = {
       schemaIpc: tableToIPC(new Table(schema), 'stream'),
-      pushdown: options.pushdown ?? false,
+      filterPushdown: typeof table.supportsFilters === 'function',
       callbacks: tableCallbacks(table, schema),
     };
     this.tables.set(name, registration);
@@ -208,7 +195,11 @@ export class SessionContext {
     return this.tables.delete(name);
   }
 
-  /** Runs a query and returns rows as JSON-friendly values. */
+  /**
+   * Runs a query and returns rows as JSON-friendly values. Queries are
+   * read-only: DDL (`CREATE`), DML (`INSERT`) and statements (`SET`) are
+   * rejected, so a query cannot change the session or its memory limit.
+   */
   async sql(query: string, options?: SqlOptions): Promise<QueryResult> {
     const { table, truncated } = await this.sqlArrow(query, options);
     return { ...toRows(table), truncated };
@@ -223,12 +214,12 @@ export class SessionContext {
   /** Runs a query and returns the result as an Arrow IPC stream. */
   async sqlIpc(query: string, options: SqlOptions = {}): Promise<IpcResult> {
     this.assertOpen();
-    const { maxRows, readonly = true } = options;
+    const { maxRows } = options;
     if (maxRows !== undefined && !(Number.isInteger(maxRows) && maxRows >= 0)) {
       throw new RangeError('maxRows must be a non-negative integer');
     }
     const { engine: e, context } = await this.ensureNative();
-    const task = e.call(() => context.query(query, maxRows, readonly));
+    const task = e.call(() => context.query(query, maxRows));
     return (await drive(e, task)) as IpcResult;
   }
 
@@ -273,7 +264,7 @@ export class SessionContext {
 }
 
 function register(context: Glue.Context, name: string, r: Registration): void {
-  context.registerTable(name, r.schemaIpc, r.pushdown, r.callbacks as unknown as Parameters<Glue.Context["registerTable"]>[3]);
+  context.registerTable(name, r.schemaIpc, r.filterPushdown, r.callbacks as unknown as Parameters<Glue.Context["registerTable"]>[3]);
 }
 
 // ── Bridging tables to the engine ────────────────────────────────────
@@ -282,10 +273,7 @@ function tableCallbacks(table: VirtualTable, schema: Schema): TableCallbacks {
   return {
     async supportsFilters(filtersJson) {
       const filters = (JSON.parse(filtersJson) as WireFilter[]).map(decodeFilter);
-      const answers = table.supportsFilters
-        ? await table.supportsFilters(filters)
-        : filters.map((): FilterSupport => 'inexact');
-      return JSON.stringify(answers);
+      return JSON.stringify(await table.supportsFilters!(filters));
     },
     scan(requestJson) {
       const wire = JSON.parse(requestJson) as WireScanRequest;

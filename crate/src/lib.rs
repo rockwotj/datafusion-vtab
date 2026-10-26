@@ -93,13 +93,13 @@ impl Context {
         &self,
         name: &str,
         schema_ipc: &[u8],
-        pushdown: bool,
+        filter_pushdown: bool,
         callbacks: TableCallbacks,
     ) -> Result<(), JsValue> {
         let reader = StreamReader::try_new(Cursor::new(schema_ipc), None)
             .map_err(|e| JsValue::from(js_sys::Error::new(&format!("invalid schema: {e}"))))?;
         let schema = reader.schema();
-        let table = Arc::new(JsTable::new(name.to_string(), schema, pushdown, callbacks));
+        let table = Arc::new(JsTable::new(name.to_string(), schema, filter_pushdown, callbacks));
         self.session
             .register_table(name, Arc::clone(&table) as _)
             .map_err(to_js)?;
@@ -121,12 +121,12 @@ impl Context {
     }
 
     /// Runs a query. The task resolves to `{ ipc: Uint8Array, truncated: boolean }`.
-    pub fn query(&self, sql: String, max_rows: Option<f64>, readonly: bool) -> Task {
+    pub fn query(&self, sql: String, max_rows: Option<f64>) -> Task {
         let session = self.session.clone();
         let tables: Vec<Arc<JsTable>> = self.tables.borrow().values().cloned().collect();
         let max_rows = max_rows.map(|n| n as usize);
         Task::new(async move {
-            let (ipc, truncated) = run_query(&session, &tables, &sql, max_rows, readonly)
+            let (ipc, truncated) = run_query(&session, &tables, &sql, max_rows)
                 .await
                 .map_err(to_js)?;
             let result = js_sys::Object::new();
@@ -142,12 +142,13 @@ async fn run_query(
     tables: &[Arc<JsTable>],
     sql: &str,
     max_rows: Option<usize>,
-    readonly: bool,
 ) -> Result<(Vec<u8>, bool)> {
+    // Queries cannot change the session: no CREATE, INSERT or SET. SET could
+    // otherwise raise the session's memory limit.
     let options = SQLOptions::new()
-        .with_allow_ddl(!readonly)
-        .with_allow_dml(!readonly)
-        .with_allow_statements(!readonly);
+        .with_allow_ddl(false)
+        .with_allow_dml(false)
+        .with_allow_statements(false);
     let mut df = session.sql_with_options(sql, options).await?;
     df = json_unions_to_text(df)?;
     if let Some(n) = max_rows {

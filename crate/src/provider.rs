@@ -111,17 +111,18 @@ struct FilterAnswers {
 pub struct JsTable {
     name: String,
     schema: SchemaRef,
-    pushdown: bool,
+    /// False when the JavaScript table has no `supportsFilters`.
+    filter_pushdown: bool,
     callbacks: SingleThreaded<TableCallbacks>,
     filters: Mutex<FilterAnswers>,
 }
 
 impl JsTable {
-    pub fn new(name: String, schema: SchemaRef, pushdown: bool, callbacks: TableCallbacks) -> Self {
+    pub fn new(name: String, schema: SchemaRef, filter_pushdown: bool, callbacks: TableCallbacks) -> Self {
         JsTable {
             name,
             schema,
-            pushdown,
+            filter_pushdown,
             callbacks: SingleThreaded(callbacks),
             filters: Mutex::new(FilterAnswers::default()),
         }
@@ -207,7 +208,7 @@ impl TableProvider for JsTable {
     }
 
     fn supports_filters_pushdown(&self, filters: &[&Expr]) -> Result<Vec<TableProviderFilterPushDown>> {
-        if !self.pushdown {
+        if !self.filter_pushdown {
             return Ok(vec![TableProviderFilterPushDown::Unsupported; filters.len()]);
         }
         let mut state = self.filters.lock().unwrap();
@@ -248,12 +249,9 @@ impl TableProvider for JsTable {
             None => Arc::clone(&self.schema),
         };
         let columns: Vec<&str> = projected_schema.fields().iter().map(|f| f.name().as_str()).collect();
-        let (filters, limit) = if self.pushdown {
-            let filters: Vec<serde_json::Value> = filters.iter().filter_map(filter::to_json).collect();
-            (filters, limit)
-        } else {
-            (vec![], None)
-        };
+        // DataFusion only passes filters this table accepted, and only passes a
+        // limit when no filter remains to be applied above the scan.
+        let filters: Vec<serde_json::Value> = filters.iter().filter_map(filter::to_json).collect();
         let request = json!({
             "projection": columns,
             "filters": filters,
