@@ -37,7 +37,7 @@
     "build:ts": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/wasm', 'dist/wasm', { recursive: true })\"",
     "build": "npm run build:wasm && npm run build:ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/",
+    "test": "node --test \"test/*.test.ts\"",
     "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {

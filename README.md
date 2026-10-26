@@ -12,6 +12,8 @@ registering async virtual tables and running SQL over them.
   hard cap. A runaway query fails with an error instead of taking down the process.
 - JSON stored in string columns can be queried with `->`, `->>` and `json_get_*` functions.
 - No native builds: one `.wasm` file runs on every platform Node runs on, including inside `worker_threads`.
+  It is 20.5 MB (5.7 MB gzipped), built with `opt-level = "z"`, LTO and `wasm-opt -Oz`. Almost all of
+  that is DataFusion's planner and execution engine.
 
 ## Install
 
